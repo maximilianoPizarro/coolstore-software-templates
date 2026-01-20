@@ -27,15 +27,15 @@ health:
   probeDelay: 5
   probePeriod: 10
   probeTimeout: 2
-env: 
-    - name: COMPONENT_CATALOG_HOST
-      value: catalog.globex-${{values.user_id}}.svc.cluster.local
-    - name: COMPONENT_CATALOG_PORT
-      value: '8080'
-    - name: COMPONENT_INVENTORY_HOST
-      value: inventory-app-${{values.user_id}}
-    - name: COMPONENT_INVENTORY_PORT
-      value: '8080'
+env:
+  - name: COMPONENT_CATALOG_HOST
+    value: catalog.globex-${{values.user_id}}.svc.cluster.local
+  - name: COMPONENT_CATALOG_PORT
+    value: '8080'
+  - name: COMPONENT_INVENTORY_HOST
+    value: inventory-app-${{values.user_id}}
+  - name: COMPONENT_INVENTORY_PORT
+    value: '8080'
 autoscaling:
   enabled: false
 namespace:
