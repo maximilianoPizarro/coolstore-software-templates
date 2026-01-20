@@ -32,8 +32,8 @@ public class GatewayVerticle extends AbstractVerticle {
         Router router = Router.router(vertx);
         router.route().handler(CorsHandler.create("*").allowedMethod(HttpMethod.GET));
         router.get("/*").handler(StaticHandler.create("assets"));
-        router.get("/health").handler(this::health); 
-        router.get("/api/products").handler(this::products); 
+        router.get("/health").handler(this::health);
+        router.get("/api/products").handler(this::products);
 
         ConfigRetriever retriever = ConfigRetriever.create(vertx);
         retriever.getConfig(ar -> {
@@ -42,13 +42,13 @@ public class GatewayVerticle extends AbstractVerticle {
             } else {
                 JsonObject config = ar.result();
 
-                String catalogApiHost = config.getString("COMPONENT_CATALOG_HOST", "localhost"); 
-                Integer catalogApiPort = config.getInteger("COMPONENT_CATALOG_PORT", 9000); 
+                String catalogApiHost = config.getString("COMPONENT_CATALOG_HOST", "localhost");
+                Integer catalogApiPort = config.getInteger("COMPONENT_CATALOG_PORT", 9000);
 
                 catalog = WebClient.create(vertx,
-                    new WebClientOptions()
-                        .setDefaultHost(catalogApiHost)
-                        .setDefaultPort(catalogApiPort));
+                        new WebClientOptions()
+                                .setDefaultHost(catalogApiHost)
+                                .setDefaultPort(catalogApiPort));
 
                 LOG.info("Catalog Service Endpoint: " + catalogApiHost + ":" + catalogApiPort.toString());
 
@@ -56,79 +56,83 @@ public class GatewayVerticle extends AbstractVerticle {
                 Integer inventoryApiPort = config.getInteger("COMPONENT_INVENTORY_PORT", 8080);
 
                 inventory = WebClient.create(vertx,
-                    new WebClientOptions()
-                        .setDefaultHost(inventoryApiHost)
-                        .setDefaultPort(inventoryApiPort));
+                        new WebClientOptions()
+                                .setDefaultHost(inventoryApiHost)
+                                .setDefaultPort(inventoryApiPort));
 
                 LOG.info("Inventory Service Endpoint: " + inventoryApiHost + ":" + inventoryApiPort.toString());
 
                 vertx.createHttpServer()
-                    .requestHandler(router)
-                    .listen(Integer.getInteger("http.port", 8090));
+                        .requestHandler(router)
+                        .listen(Integer.getInteger("http.port", 8090));
 
                 LOG.info("Server is running on port " + Integer.getInteger("http.port", 8090));
             }
         });
     }
 
-    private void products(RoutingContext rc) { 
+    private void products(RoutingContext rc) {
         // Retrieve catalog
         catalog
-            .get("/api/catalog")
-            .expect(ResponsePredicate.SC_OK)
-            .as(BodyCodec.jsonArray())
-            .rxSend()
-            .map(resp -> {
-                // Map the response to a list of JSON object
-                List<JsonObject> listOfProducts = new ArrayList<>();
-                for (Object product : resp.body()) {
-                    listOfProducts.add((JsonObject)product);
-                }
-                return listOfProducts;
-            })
-            .flatMap(products -> {
+                .get("/services/products")
+                .expect(ResponsePredicate.SC_OK)
+                .as(BodyCodec.jsonObject())
+                .rxSend()
+                .map(resp -> {
+                    // Extract the content array from the response object
+                    JsonArray contentArray = resp.body().getJsonArray("content");
+                    // Map the response to a list of JSON object
+                    List<JsonObject> listOfProducts = new ArrayList<>();
+                    if (contentArray != null) {
+                        for (Object product : contentArray) {
+                            listOfProducts.add((JsonObject) product);
+                        }
+                    }
+                    return listOfProducts;
+                })
+                .flatMap(products -> {
                     // For each item from the catalog, invoke the inventory service
                     // and create a JsonArray containing all the results
                     return Observable.fromIterable(products)
-                        .flatMapSingle(this::getAvailabilityFromInventory)
-                        .collect(JsonArray::new, JsonArray::add);
-                }
-            )
-            .subscribe(
-                list -> rc.response().end(list.encodePrettily()),
-                error -> rc.response().setStatusCode(500).end(new JsonObject().put("error", error.getMessage()).toString())
-            );
+                            .flatMapSingle(this::getAvailabilityFromInventory)
+                            .collect(JsonArray::new, JsonArray::add);
+                })
+                .subscribe(
+                        list -> rc.response().end(list.encodePrettily()),
+                        error -> rc.response().setStatusCode(500)
+                                .end(new JsonObject().put("error", error.getMessage()).toString()));
     }
 
-    private Single<JsonObject> getAvailabilityFromInventory(JsonObject product) { 
+    private Single<JsonObject> getAvailabilityFromInventory(JsonObject product) {
         // Retrieve the inventory for a given product
         return inventory
-            .get("/api/inventory/" + product.getString("itemId"))
-            .as(BodyCodec.jsonObject())
-            .rxSend()
-            .map(resp -> {
-                if (resp.statusCode() != 200) {
-                    LOG.warn("Inventory error for {}: status code {}",
-                        product.getString("itemId"), resp.statusCode());
-                    return product.copy();
-                }
-                return product.copy().put("availability",
-                    new JsonObject().put("quantity", resp.body().getInteger("quantity")));
-            });
+                .get("/api/inventory/" + product.getString("itemId"))
+                .as(BodyCodec.jsonObject())
+                .rxSend()
+                .map(resp -> {
+                    if (resp.statusCode() != 200) {
+                        LOG.warn("Inventory error for {}: status code {}",
+                                product.getString("itemId"), resp.statusCode());
+                        return product.copy();
+                    }
+                    return product.copy().put("availability",
+                            new JsonObject().put("quantity", resp.body().getInteger("quantity")));
+                });
     }
 
-    private void health(RoutingContext rc) { 
+    private void health(RoutingContext rc) {
         // Check Catalog and Inventory Service up and running
         catalog.get("/").rxSend()
-            .subscribe(
-                catalogCallOk -> {
-                    inventory.get("/").rxSend()
-                        .subscribe(
-                            inventoryCallOk -> rc.response().setStatusCode(200).end(new JsonObject().put("status", "UP").toString()),
-                            error -> rc.response().setStatusCode(503).end(new JsonObject().put("status", "DOWN").toString())
-                        );
-                },
-                error -> rc.response().setStatusCode(503).end(new JsonObject().put("status", "DOWN").toString())
-            );
+                .subscribe(
+                        catalogCallOk -> {
+                            inventory.get("/").rxSend()
+                                    .subscribe(
+                                            inventoryCallOk -> rc.response().setStatusCode(200)
+                                                    .end(new JsonObject().put("status", "UP").toString()),
+                                            error -> rc.response().setStatusCode(503)
+                                                    .end(new JsonObject().put("status", "DOWN").toString()));
+                        },
+                        error -> rc.response().setStatusCode(503)
+                                .end(new JsonObject().put("status", "DOWN").toString()));
     }
 }
